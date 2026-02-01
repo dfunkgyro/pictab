@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/document_analyzer_service.dart';
+import '../services/file_processor_service.dart';
 import '../services/roster_service.dart';
 import '../models/document_type.dart';
 import 'analysis_screen.dart';
 import 'roster_screen.dart';
+import 'table_screen.dart';
 import 'saved_documents_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,7 +21,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
+  late FileProcessorService _fileProcessor;
   bool _isLoading = false;
+  String _loadingMessage = 'Processing...';
+
+  @override
+  void initState() {
+    super.initState();
+    _fileProcessor = FileProcessorService(
+      context.read<DocumentAnalyzerService>(),
+    );
+  }
 
   Future<void> _pickImage(ImageSource source) async {
     try {
@@ -30,37 +43,107 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (image != null) {
-        _analyzeImage(File(image.path));
+        _processFile(File(image.path));
       }
     } catch (e) {
       _showError('Failed to pick image: $e');
     }
   }
 
-  Future<void> _analyzeImage(File imageFile) async {
-    setState(() => _isLoading = true);
+  Future<void> _pickFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'csv'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = File(result.files.first.path!);
+        _processFile(file);
+      }
+    } catch (e) {
+      _showError('Failed to pick file: $e');
+    }
+  }
+
+  Future<void> _processFile(File file) async {
+    final fileType = _fileProcessor.getFileType(file.path);
+
+    setState(() {
+      _isLoading = true;
+      _loadingMessage = _getLoadingMessage(fileType);
+    });
 
     try {
-      final analyzer = context.read<DocumentAnalyzerService>();
-      final result = await analyzer.analyzeImage(imageFile);
+      final result = await _fileProcessor.processFile(file);
 
       if (!mounted) return;
 
       setState(() => _isLoading = false);
 
-      // Navigate to analysis screen with results
+      if (!result.isSuccessful) {
+        _showError(result.errorMessage ?? 'Processing failed');
+        return;
+      }
+
+      // Navigate based on result
+      _navigateToResult(result, file);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showError('Processing failed: $e');
+    }
+  }
+
+  String _getLoadingMessage(FileType fileType) {
+    switch (fileType) {
+      case FileType.image:
+        return 'Analyzing image...\nExtracting text with OCR';
+      case FileType.pdf:
+        return 'Processing PDF...\nConverting pages and extracting text';
+      case FileType.csv:
+        return 'Parsing CSV...\nImporting data';
+      case FileType.unknown:
+        return 'Processing file...';
+    }
+  }
+
+  void _navigateToResult(FileProcessingResult result, File originalFile) {
+    // If we got a roster directly (from CSV)
+    if (result.roster != null) {
+      final rosterService = context.read<RosterService>();
+      rosterService.setCurrentRoster(result.roster!);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const RosterScreen(),
+        ),
+      );
+      return;
+    }
+
+    // If we got a data table directly (from CSV)
+    if (result.dataTable != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => TableScreen(table: result.dataTable!),
+        ),
+      );
+      return;
+    }
+
+    // Otherwise, go to analysis screen
+    if (result.analysisResult != null) {
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => AnalysisScreen(
-            imageFile: imageFile,
-            analysisResult: result,
+            imageFile: result.processedImageFile ?? originalFile,
+            analysisResult: result.analysisResult!,
           ),
         ),
       );
-    } catch (e) {
-      setState(() => _isLoading = false);
-      _showError('Analysis failed: $e');
     }
   }
 
@@ -73,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showImageSourceDialog() {
+  void _showFileSourceDialog() {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -86,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                'Select Image Source',
+                'Select File Source',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -110,11 +193,23 @@ class _HomeScreenState extends State<HomeScreen> {
                   backgroundColor: Color(0xFF003366),
                   child: Icon(Icons.photo_library, color: Colors.white),
                 ),
-                title: const Text('Gallery'),
-                subtitle: const Text('Select from your photo library'),
+                title: const Text('Photo Gallery'),
+                subtitle: const Text('Select image from gallery'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF003366),
+                  child: Icon(Icons.folder_open, color: Colors.white),
+                ),
+                title: const Text('Browse Files'),
+                subtitle: const Text('Select JPG, PNG, PDF, or CSV file'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickFile();
                 },
               ),
             ],
@@ -145,20 +240,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 20),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 20),
                   Text(
-                    'Analyzing image...',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Extracting text and identifying document type',
-                    style: TextStyle(color: Colors.grey),
+                    _loadingMessage,
+                    style: const TextStyle(fontSize: 16),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
@@ -181,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'Upload an Image',
+                            'Upload a File',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -189,15 +280,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'PicTab will analyze your image and convert it into an interactive digital format',
+                            'PicTab will analyze your file and convert it into an interactive digital format',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.grey),
                           ),
                           const SizedBox(height: 24),
                           ElevatedButton.icon(
-                            onPressed: _showImageSourceDialog,
-                            icon: const Icon(Icons.add_photo_alternate),
-                            label: const Text('Select Image'),
+                            onPressed: _showFileSourceDialog,
+                            icon: const Icon(Icons.upload_file),
+                            label: const Text('Select File'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 32,
@@ -212,9 +303,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   const SizedBox(height: 24),
 
+                  // Supported file formats
+                  const Text(
+                    'Supported File Formats',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _buildFileFormatCard(
+                    icon: Icons.image,
+                    title: 'Images (JPG, PNG)',
+                    description: 'Photos of rosters, tables, or documents - analyzed with OCR',
+                    color: Colors.blue,
+                  ),
+                  _buildFileFormatCard(
+                    icon: Icons.picture_as_pdf,
+                    title: 'PDF Documents',
+                    description: 'PDF files - pages converted to images then analyzed',
+                    color: Colors.red,
+                  ),
+                  _buildFileFormatCard(
+                    icon: Icons.table_chart,
+                    title: 'CSV Files',
+                    description: 'Spreadsheet data - directly imported without OCR',
+                    color: Colors.green,
+                  ),
+
+                  const SizedBox(height: 24),
+
                   // Supported document types
                   const Text(
-                    'Supported Document Types',
+                    'Recognized Document Types',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -241,12 +363,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: 'Invoices & Receipts',
                     description: 'Bills, purchase receipts, and financial documents',
                     color: Colors.orange,
-                  ),
-                  _buildDocumentTypeCard(
-                    icon: Icons.description,
-                    title: 'Forms',
-                    description: 'Structured forms with fields and values',
-                    color: Colors.purple,
                   ),
 
                   const SizedBox(height: 24),
@@ -291,6 +407,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildFileFormatCard({
+    required IconData icon,
+    required String title,
+    required String description,
+    required Color color,
+  }) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.1),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+        subtitle: Text(
+          description,
+          style: const TextStyle(fontSize: 12),
+        ),
+      ),
     );
   }
 
