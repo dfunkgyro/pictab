@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staff Roster Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Staff Roster Manager</h1>
+            <div class="controls">
+                <button id="addEmployee" class="btn btn-primary">+ Add Employee</button>
+                <button id="exportData" class="btn btn-secondary">Export JSON</button>
+                <button id="printRoster" class="btn btn-secondary">Print</button>
+            </div>
+        </header>
+
+        <div class="legend">
+            <h3>Shift Codes:</h3>
+            <div class="legend-items" id="legendItems"></div>
+        </div>
+
+        <div class="roster-container">
+            <table id="rosterTable">
+                <thead id="tableHeader"></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Edit Shift Modal -->
+        <div id="editModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Edit Shift</h2>
+                <div class="modal-body">
+                    <p><strong>Employee:</strong> <span id="modalEmployee"></span></p>
+                    <p><strong>Date:</strong> <span id="modalDate"></span></p>
+                    <label for="shiftSelect">Shift Type:</label>
+                    <select id="shiftSelect"></select>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveShift" class="btn btn-primary">Save</button>
+                    <button id="cancelEdit" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Employee Modal -->
+        <div id="addEmployeeModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Add New Employee</h2>
+                <div class="modal-body">
+                    <label for="employeeName">Employee Name:</label>
+                    <input type="text" id="employeeName" placeholder="Enter name">
+                    <label for="defaultShift">Default Shift:</label>
+                    <select id="defaultShift"></select>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveEmployee" class="btn btn-primary">Add Employee</button>
+                    <button id="cancelAddEmployee" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
